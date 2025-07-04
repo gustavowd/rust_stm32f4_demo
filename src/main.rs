@@ -11,6 +11,8 @@ use embassy_stm32::Config;
 use embassy_stm32::gpio::{Output, Pull, Level, Speed};
 use embassy_stm32::exti::ExtiInput;
 use embassy_time::Timer;
+use embassy_stm32::bind_interrupts;
+use embassy_stm32::usart::{self, Uart};
 use {defmt_rtt as _, panic_probe as _};
 
 
@@ -27,7 +29,25 @@ async fn button_task(mut button: ExtiInput<'static>) {
     }
 }
 
+// Declare async tasks
+#[embassy_executor::task]
+async fn uart_task(mut uart: Uart<'static, embassy_stm32::mode::Async>) {
+    info!("UART started, type something...");
+    uart.write("UART started, type something...".as_bytes()).await.unwrap();
 
+    let mut buffer = [0u8; 1];
+
+    // Loop to read from UART and echo back
+    loop {
+        uart.read(&mut buffer).await.unwrap();
+        uart.write(&buffer).await.unwrap();
+    }
+}
+
+
+bind_interrupts!(struct Irqs {
+    USART1 => embassy_stm32::usart::InterruptHandler<embassy_stm32::peripherals::USART1>;
+});
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
@@ -63,6 +83,11 @@ async fn main(spawner: Spawner) {
 
 
     spawner.spawn(button_task(button)).unwrap();
+
+    let mut config = usart::Config::default();
+    config.baudrate = 115_200;
+    let usart = Uart::new(p.USART1, p.PA10, p.PA9, Irqs, p.DMA2_CH7, p.DMA2_CH2, config).unwrap();
+    spawner.spawn(uart_task(usart)).unwrap();
 
 
     let mut led = Output::new(p.PD12, Level::High, Speed::Low);
